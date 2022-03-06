@@ -12,7 +12,7 @@
 
 保存字节常数或字符或表达式
 
-```
+```assembly
 DB 73H,01H,90H
 DB "Hello!"
 ```
@@ -21,7 +21,7 @@ DB "Hello!"
 
 保存字数据（16位）
 
-```
+```assembly
 DB 1234H,90H
 ```
 
@@ -201,6 +201,136 @@ PRG3:
 
 ## 4.3.3 循环程序设计
 
+### 一、单重循环
+
+1. 片内RAM38H-47H存放16个二进制无符号数，求和存放R4、R5
+
+```assembly
+		ORG 0800H
+START:	MOV R0,#38H		;起始地址
+		MOV R2,#10H		;计次循环
+		MOV R4,#00H
+		MOV R5,#00H
+LOOP:	MOV A,R5		;低位送A
+		ADD A,@R0		;A=A+R0
+		MOV R5,A		;R5=A
+		CLR A			;A=0
+		ADDC A,R4		;A=A+R4+CY
+		MOV R4,A		;R4=A
+		INC R0			;R0++
+		DJNZ R2,LOOP	;if R2!=0 goto LOOP
+		SJMP $			;阻塞
+		END
+```
+
+2. 片内RAM的30H-4FH传送至片外1800H开始
+
+```assembly
+		ORG 1000H
+START:	MOV R0,#30H
+		MOV DPTR,#1800H		;访问片外RAM应使用MOVX，并使用DPTR做地址
+		MOV R2,#20H
+LOOP:	MOV A,@R0
+		MOVX @DPTR,A
+		INC R0
+		INC DPTR
+		DJNZ R2,LOOP
+		SJMP $
+		END
+```
+
+### 二、多重循环
+
+设计50ms延时程序
+
+```assembly
+		ORG 0800H
+DELAY:	MOV R7,#200		;外循环次数，1T
+DLY1:	MOV R6,#123		;内循环次数，1T
+DLY2:	DJNZ R6,DLY2	;R6不为1时循环，2T
+		NOP				;1T
+		DJNZ R7,DLY1	;R7不为1时循环，2T
+		RET				;2T
+```
+
+$f_{OSC}=12MHz$时，1T为1us
+
+总延迟=(246+2+1+1)T*200+2T+1T=50.003ms
+
 ## 4.3.4 数值转换程序
 
+### 一、BIN - BCD
+
+入口：16bit无符号数R3、R2
+
+出口：R6、R5、R4
+
+```assembly
+BINBCD:	CLR A
+		MOV R4,A
+		MOV R5,A
+		MOV R6,A
+		MOV R7,#10H			;计次
+LOOP:	CLR C
+		MOV A,R2
+		RLC A
+		MOV R2,A
+		MOV A,R3
+		RLC A
+		MOV R3,A
+		MOV A,R4
+		ADDC A,R4
+		DA A
+		MOV R4,A
+		MOV A,R5
+		ADDC A,R5
+		DA A
+		MOV R5,A
+		MOV A,R6
+		ADDC A,R6
+		MOV R6,A
+		DJNZ R7,LOOP
+		RET
+```
+
+### 二、BCD - BIN
+
+### 三、ASCII - BIN
+
+```assembly
+ASCBIN:	MOV A,R1			;A=R1
+		CLR C
+		SUBB A,#30H			;A-30H
+		MOV R1,A			;R1=A
+		SUBB A,#0AH			;A-10
+		JC LOOP				;IF CY=1(A<10) GOTO LOOP
+		XCH A,R1			;A=R1
+		SUBB A,#07H			;A-7
+		MOV R1,A			;R1=7
+LOOP:	RET
+```
+
 ## 4.3.5 查表程序设计
+
+查表计算$Y=X^2$
+
+```assembly
+		ORG 1000H
+START:	MOV A,30H
+		MOV DPTR,#TABLE
+		MOVC A.@A+DPTR
+		MOV 31H,A
+TABLE:	DB 0,1,4,9,16,25,36,49,64,81
+		END
+```
+
+```assembly
+		ORG 1000H
+START:	MOV A,30H
+		ADD A,#02H
+		MOVC A.@A+PC
+		MOV 31H,A
+TABLE:	DB 0,1,4,9,16,25,36,49,64,81
+		END
+```
+
