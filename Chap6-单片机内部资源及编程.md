@@ -509,7 +509,7 @@ MCS-51配备可编程全双工UART
 
 串口工作在方式2/3时：
 
-SM2=1：收到第9位数据为1，前8位送入SBUF，产生中断；收到第9位数据为0，抛弃前8位，不产生中断
+SM2=1：收到第9位数据为1，前8位送入SBUF，产生中断（地址帧）；收到第9位数据为0，抛弃前8位，不产生中断（数据帧）
 
 SM2=0：前八位送入SBUF，产生中断
 
@@ -563,11 +563,11 @@ CHMOS器件低功耗控制位，为0时正常工作，为1时掉电工作
 
 RXD作为输入输出，TXD作为时钟
 
-#### 输出
+#### 1.输出
 
 ![image-20220307112005629](pic/image-20220307112005629.png)
 
-#### 输入
+#### 2.输入
 
 ![image-20220307112022360](pic/image-20220307112022360.png)
 
@@ -575,11 +575,11 @@ RXD作为输入输出，TXD作为时钟
 
 TXD发送，RXD接收
 
-#### 输出
+#### 1.输出
 
 硬件自动加入起始位和停止位，一帧10位，8位数据
 
-#### 输入
+#### 2.输入
 
 接收器以16倍波特率采样RXD电平
 
@@ -593,11 +593,11 @@ TXD发送，RXD接收
 
 1个起始位，1个停止位，1个附加位，8个数据位
 
-#### 输出
+#### 1.输出
 
 先设置TB8作为附加位，启动串口发送，完成后置中断，需软件清0
 
-#### 输入
+#### 2.输入
 
 接收器以16倍波特率采样RXD电平
 
@@ -610,3 +610,95 @@ $\Large f_b={2^{SMOD}\over64}\times f_{OSC}$
 $\Large f_b={2^{SMOD}\over32}\times {f_{OSC}\over 12\times (256-X)}$
 
 ## 6.3.4 串行口应用
+
+### 一、拓展并行IO
+
+![image-20220307121743132](pic/image-20220307121743132.png)
+
+```assembly
+		ORG 0000H
+		LJMP MAIN
+		ORG 0030H
+MAIN:	MOV SCON #10H		;REN=1 RI=0 SM0=0 SM1=0
+LOOP:	CLR P1.0			;74165并行读入
+		SETB P1.0			;74165串行位移
+		CLR RI				;中断标志位清零
+		JNB RI,$			;等待中断
+		MOV A,SBUF			;接收完读入A
+		CLR TI				;中断清零
+		MOV SBUF,A			;输出A
+		JNB TI,$			;等待中断
+		SJMP LOOP
+		END
+```
+
+### 二、双机通信
+
+甲乙以方式1进行串口通信，波特率1200bps，晶振11.0592MHz
+
+甲机：发送外部RAM以ADDRA为首地址共128B单元
+
+乙机：顺序存放在以ADDRB为首地址的外部RAM
+
+```assembly
+		ORG 0000H
+		LJMP MAINA
+		ORG 0023H
+		AJMP SERT1A
+		ORG 0030H
+MAIN:	MOV SP,#60H			;设置堆栈指针
+		MOV SCON,#40H		;方式1
+		MOV TMOD,#20H		;方式2 自动装载
+		MOV TL1,#0E8H		;初值
+		MOV TH1,#0E8H		;装载值
+		MOV PCON,#00H		;波特率不倍增
+		SETB TR1			;启动定时器
+		SSETB EA			;中断允许
+		SETB ES				;串口中断
+		MOV DPTR,#ADDRA		;设置起始地址
+		MOVX A,@DPTR		;读外部数据
+		MOV SBUF,A			;发送
+		SJMP $
+SERT1A:	CLR T1				;清中断
+		CJNE R0,#7FH,LOOPA	;没发完128B则进入LOOPA
+		CLR ES				;关闭串口中断
+		AJMP ENDA			;结束
+LOOPA:	INC R0				;计次
+		INC DPTR			;地址后移
+		MOVX A,@DPTR		;读外部数据
+		MOV SBUF,A			;发送
+ENDA:	RETI
+		END
+```
+
+```assembly
+		ORG 0000H
+		LJMP MAINB
+		ORG 0023H
+		AJMP SERT1B
+		ORG 0030H
+MAIN:	MOV SP,#60H			;设置堆栈指针
+		MOV SCON,#50H		;方式1
+		MOV TMOD,#20H		;方式2 自动装载
+		MOV TL1,#0E8H		;初值
+		MOV TH1,#0E8H		;装载值
+		MOV PCON,#00H		;波特率不倍增
+		SETB TR1			;启动定时器
+		SSETB EA			;中断允许
+		SETB ES				;串口中断
+		MOV DPTR,#ADDRB		;缓冲区首地址送DPTR
+		MOV R0,#00H
+		SJMP $
+SERT1B:	CLR RI				;清中断
+		MOV A,SBUF			;读缓冲区
+		MOVX @DPTR,A		;写外部数据
+		CJNE R0,#7FH,LOOPB	;判断是否够128B
+		CLR ES				;关中断
+		LJMP ENDB
+LOOPB:	INC R0
+		INC DPTR
+ENDB:	RETI
+		END
+```
+
+### 三、多机通信
